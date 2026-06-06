@@ -1,6 +1,6 @@
 ﻿namespace MyFirstWinService
 {
-    partial class Service1
+    partial class MyFirstWinService
     {
         /// <summary> 
         /// Required designer variable.
