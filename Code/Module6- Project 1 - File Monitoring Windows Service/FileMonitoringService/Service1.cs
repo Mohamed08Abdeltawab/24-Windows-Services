@@ -7,78 +7,120 @@ namespace FileMonitoringService
 {
     public partial class Service1 : ServiceBase
     {
-        private FileSystemWatcher _watcher;
-        private readonly string source = ConfigurationManager.AppSettings["SourceFolder"];
-        private readonly string destination = ConfigurationManager.AppSettings["DestinationFolder"];
-        private readonly string logFile = ConfigurationManager.AppSettings["LogPath"];
+        private FileSystemWatcher fileWatcher;
+        private string sourceFolder;
+        private string destinationFolder;
+        private string logFolder;
 
-        public Service1() => InitializeComponent();
+        public Service1()
+        {
+            InitializeComponent();
+
+
+            // Read folder paths from App.config
+            sourceFolder = ConfigurationManager.AppSettings["SourceFolder"];
+            destinationFolder = ConfigurationManager.AppSettings["DestinationFolder"];
+            logFolder = ConfigurationManager.AppSettings["LogFolder"];
+
+            // Handle missing or empty configuration values
+            if (string.IsNullOrWhiteSpace(sourceFolder))
+            {
+                sourceFolder = @"C:\FileMonitoring\Source"; // Default source folder
+                Log("SourceFolder is missing in App.config. Using default: " + sourceFolder);
+            }
+
+            if (string.IsNullOrWhiteSpace(destinationFolder))
+            {
+                destinationFolder = @"C:\FileMonitoring\Destination"; // Default destination folder
+                Log("DestinationFolder is missing in App.config. Using default: " + destinationFolder);
+            }
+
+            if (string.IsNullOrWhiteSpace(logFolder))
+            {
+                logFolder = @"C:\FileMonitoring\Logs"; // Default log folder
+                Log("LogFolder is missing in App.config. Using default: " + logFolder);
+            }
+
+            // Ensure directories exist
+            Directory.CreateDirectory(sourceFolder);
+            Directory.CreateDirectory(destinationFolder);
+            Directory.CreateDirectory(logFolder);
+        }
+
+
 
         protected override void OnStart(string[] args)
         {
-            // Ensure the source directory exists before starting the watcher
-            if (!Directory.Exists(source))
+            Log("Service Started.");
+
+            // Initialize FileSystemWatcher
+            fileWatcher = new FileSystemWatcher
             {
-                throw new DirectoryNotFoundException($"Source folder not found: {source}");
-            }
+                Path = sourceFolder,
+                Filter = "*.*",
+                EnableRaisingEvents = true,
+                IncludeSubdirectories = false
+            };
 
-            _watcher = new FileSystemWatcher(source);
-            _watcher.Created += OnCreated;
-            _watcher.EnableRaisingEvents = true;
-        }
+            fileWatcher.Created += OnFileCreated;
 
-        private void OnCreated(object sender, FileSystemEventArgs e)
-        {
-            // Check if the file is fully written and accessible
-            if (!IsFileReady(e.FullPath)) return;
+            Log("File monitoring started on folder: " + sourceFolder);
 
-            // Generate a unique file name using GUID and preserve the original extension
-            string destinationPath = Path.Combine(destination, Guid.NewGuid().ToString() + Path.GetExtension(e.Name));
-
-            try
-            {
-                // Move the file to the destination
-                File.Move(e.FullPath, destinationPath);
-                WriteLog($"Successfully moved: {e.Name} to {destinationPath}");
-            }
-            catch (Exception ex)
-            {
-                // Log any errors encountered during the move process
-                WriteLog($"Error processing {e.Name}: {ex.Message}");
-            }
-        }
-
-        // Helper method to verify if a file is locked by another process
-        private bool IsFileReady(string filePath)
-        {
-            try
-            {
-                using (FileStream fs = File.Open(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-                {
-                    return fs.Length > 0;
-                }
-            }
-            catch (IOException)
-            {
-                return false;
-            }
-        }
-
-        // Centralized logging method
-        private void WriteLog(string message)
-        {
-            string logEntry = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} | {message}{Environment.NewLine}";
-            File.AppendAllText(logFile, logEntry);
         }
 
         protected override void OnStop()
         {
-            // Properly clean up resources when the service stops
-            if (_watcher != null)
+            fileWatcher.EnableRaisingEvents = false;
+            fileWatcher.Dispose();
+            Log("Service Stopped.");
+
+        }
+
+        private void OnFileCreated(object sender, FileSystemEventArgs e)
+        {
+            try
             {
-                _watcher.EnableRaisingEvents = false;
-                _watcher.Dispose();
+                // Log file creation
+                Log($"File detected: {e.FullPath}");
+
+                // Generate GUID and prepare new file name
+                string newFileName = $"{Guid.NewGuid()}{Path.GetExtension(e.Name)}";
+                string destinationFile = Path.Combine(destinationFolder, newFileName);
+
+                // Move and rename the file
+                File.Move(e.FullPath, destinationFile);
+
+                // Log success
+                Log($"File moved: {e.FullPath} -> {destinationFile}");
             }
+            catch (Exception ex)
+            {
+                Log($"Error processing file: {e.FullPath}. Exception: {ex.Message}");
+            }
+        }
+
+        private void Log(string message)
+        {
+            string logFilePath = Path.Combine(logFolder, "ServiceLog.txt");
+            string logMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\n";
+
+            File.AppendAllText(logFilePath, logMessage);
+
+            // Output to console if running in debug mode
+            if (Environment.UserInteractive)
+            {
+                Console.WriteLine(logMessage);
+            }
+        }
+
+        public void StartInConsole()
+        {
+            OnStart(null);
+            Console.WriteLine("Press Enter to stop the service...");
+            Console.ReadLine();
+
+            OnStop();
+
         }
     }
 }
